@@ -1,5 +1,118 @@
 # Changelog
 
+## 2.3.0 (2026-09-30)
+
+A feature release: live data sources, a signed template library, native players for Raspberry Pi
+and Windows, a Platform area for server administrators, limited-time sales, and a refreshed look —
+plus a run of upload, support-session and proof-of-play fixes found in the field.
+
+No outside code contributions in this release. Thanks to **Hadi** (Discord) for the report behind the
+add-content folder fix and display reordering (#454).
+
+### Added
+
+**Live data sources, built in (#457).** REST API, Google Sheets, CSV, RSS/Atom and a manual table join
+Calendar and Weather, on every workspace with no plugin or switch. One table engine turns any
+row-shaped source into slide variables (`{{ds:slug.row1_price}}`), numeric aggregates, and — the one
+to recommend — a **key column**, so `{{ds:menu.latte_price}}` keeps pointing at the right row after
+the sheet is sorted.
+- ⚠️ REST credentials are encrypted at rest, redacted on every read, back-filled into a test only for
+  the origin they were saved with, and a custom API-key header never follows a redirect.
+- ⚠️ An unshared Google Sheet answers **200 with a sign-in page**, not 401: any HTML answer is an
+  explained error, never cached as data.
+- `updated` means "the data last changed", so an unchanged sync no longer bumps every bound widget
+  and defeats the players' render cache.
+- A cross-org test proves the list, every per-id route, secret back-fill and a spoofed
+  `X-Workspace-Id` stay inside the workspace.
+
+**Community template library (#455).** Slide templates (fields bound to live data) and sandboxed code
+templates, installed from a catalog whose index and packages are Ed25519-signed with a dedicated
+catalog key, with a serial number and revocation; unsigned code templates stay off until a platform
+admin allows them. Ships *UPTIME 3036*, an MIT game, as a code-template example.
+
+**Native players for Raspberry Pi and Windows (#453).** One Python/Qt engine (PySide6 — LGPL, never
+PyQt6) with OS backends, held to the Android player's shared test vectors. The Pi player is a `.deb`
+(Pi OS Trixie), the Windows player an installer plus a LocalSystem helper service; both are served
+by the operator's own server and self-update only on a sha256 match announced by that server.
+⚠️ These packages are **not** built by the release workflow: a server offers them once they are
+staged on it, and `/download/` says so when they are absent.
+
+**Platform area for server administrators (#459).** The admin page's ten unrelated sections become a
+Platform sidebar group — Overview, Users, Organizations, Plans & sales, Branding, System, Cleanup,
+Plugins — each loading only its own data; `#/admin` redirects to the Overview.
+- **Overview**: users, organizations, screens online, paying accounts and trials; activity and
+  health (new sign-ups, inactive 30 days, accounts and organizations with no screens, screens
+  offline 24h+, trials ending, unverified emails, storage, stale accounts); and *Needs your
+  attention* items that expand into the specifics with a link to the page that fixes each.
+- **Cleanup**: stale = a customer account, not paying, no trial, no paired screen, sharing nothing,
+  with no activity (sign-in, sign-up, API-token use or dashboard action) for N days. Notice first —
+  an email "deleted on <date> unless you sign in", recorded only if it was sent; signing in or any
+  later activity voids it; delete takes only accounts whose notice ran out, re-checking each at every
+  step. Uploads are removed from disk only when no other row references them. Audited.
+- Users and Organizations search; Player debug finally linked from System; Settings no longer
+  carries a second copy of the all-users table.
+
+**Members → Whole organization (#459).** Org owners/admins and platform staff see everyone in the
+organization across its workspaces (`GET /api/workspaces/:id/organization-members`); workspace
+admins and other organizations are refused.
+
+**Limited-time sales (#458).** Admin → Plans & sales: percent off, plans, monthly/yearly, how long the
+discount lasts, start and end. ⚠️ Every sale is a Stripe coupon that **checkout attaches**, with
+`redeem_by` at the sale's end, so the struck-through price is what is charged. Shown on the homepage
+(banner + countdown on the server clock) and the Billing page (not to existing subscribers, whose
+changes go through the Stripe portal). One rule everywhere: no checkout (self-hosted, or no Stripe)
+means no sale anywhere.
+
+**Hourly proof-of-play rollup (#451).** `play_logs` was 76% of a production database and still
+growing. Plays are aggregated into UTC hourly buckets (45x smaller) so raw rows can later be pruned
+without losing the record; raw retention is unchanged in this release.
+
+### Changed
+
+- **Sidebar grouped by job (#456)**: Devices, Publish, Create, Automate, Insights, Workspace (and
+  Platform), collapsible, remembered per browser, translated into all ten languages; a collapsed
+  group shows the badges of what it hides.
+- **Release palette dashboard-wide (#459)**: gradient primary actions and active navigation, a
+  gradient bar on cards and modals. ⚠️ A customised white-label colour replaces all of it; the
+  server's default colour (`#3B82F6`) is not treated as a brand.
+- **Homepage (#458)**: a release section for live data, templates and native players; comparison
+  tables and the Yodeck/OptiSigns pages gain live-data and template rows (competitor tiers read off
+  their pricing pages on 2026-09-30).
+- **1 MiB upload chunks (#450)** instead of 5 MiB, so the progress bar moves every few seconds and a
+  0.3 Mbps uplink can finish a chunk inside the 125 s proxy ceiling; chunk requests get their own
+  rate-limit budget so fast links are not refused mid-file.
+
+### Fixed
+
+- **Add-content folders (#454)** had not worked since 2.2.0 (`childrenOf.get` on a function, error
+  swallowed). The Displays → Playlist picker is now the same component as the Playlists one, with
+  folders, search and scrolling for hundreds of items; displays can be reordered by dragging.
+- **Proof-of-play (#452)**: the Android player reported `completed = true` on every advance, so a
+  screen failing every item wrote a perfect run of successes. A fault now marks the item incomplete.
+- **Support sessions (#448, #449)** could not upload or pair ("No plan found"), and an upload that
+  transferred every byte then died at the `INSERT` on a foreign key, orphaning the file. Both fixed;
+  support uploads belong to the workspace, not to an account.
+- **Unclaimed devices (#447)** lost every live dashboard event (a null room), and
+  `GET /api/subscription/me` threw for a session with no users row.
+
+### Security
+
+Found while security-testing the template library (#454); each predated it.
+- `POST /api/status/import` skipped the read-only check, so a workspace viewer could create devices
+  and playlists and overwrite branding including `custom_css`.
+- A plugin zip was inflated in full before its size was checked (a 300 KB upload grew the process by
+  ~600 MB). Inflation is now streamed and capped.
+- Rate limiters keyed on the raw path while Express routes on the decoded one, so `%68tml` stepped
+  around every limiter.
+- The native player's playlist web view granted the microphone to any origin.
+
+### Upgrade notes
+
+- Migrations are additive and run on boot: template tables, `promotions`, `users.cleanup_warned_at`
+  / `cleanup_delete_after`, and an index on `activity_log(user_id, created_at)`.
+- Sales need a cloud-mode server with Stripe configured; stale-account notices need email.
+- Stage the native Pi and Windows packages on the server separately if you want to offer them.
+
 ## 2.2.3 (2026-09-26)
 
 ### Added

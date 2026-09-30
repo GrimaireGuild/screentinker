@@ -14,6 +14,19 @@
   ],
   "releases": [
     {
+      "version": "2.3.0",
+      "date": "2026-09-30",
+      "notes": [
+        "Connect live data without code: paste a Google Sheets link, point at any REST API, or use a CSV file, an RSS feed or a table you type in. Put a value on a slide and your screens update whenever the data changes.",
+        "A template library: install ready-made slide and code templates from a signed catalog, or import your own, and fill their fields from live data.",
+        "Native players for Raspberry Pi and Windows, downloaded from your own server. They start with the device, recover on their own and keep themselves up to date.",
+        "The sidebar is grouped by task and each group folds away. The add-content picker shows your folders again, and displays can be reordered by dragging. The dashboard also has a refreshed look.",
+        "Organization owners and admins can see everyone in the organization from Members, across all of its workspaces.",
+        "Server administrators get a Platform section: an overview of the whole server and what needs attention, user and organization search, and a cleanup tool that warns inactive accounts by email before removing them.",
+        "Uploads move in smaller steps, so the progress bar keeps moving and slow connections can finish. Proof-of-play no longer counts failed playback as completed."
+      ]
+    },
+    {
       "version": "2.2.3",
       "date": "2026-09-26",
       "notes": [
