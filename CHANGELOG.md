@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 2.3.1
+
+A patch release: duplicating widgets, the player version on every Displays card, two web/Pi player
+fixes from an outside contributor, and an ffmpeg probe that survives a slow first boot.
+
+**@tizmagik** authored 2 of the 7 commits in this release — the offline-playback stall (#460) and the
+missed same-version deploy (#461), both found on a real Raspberry Pi. Thanks also to **Bold Media
+Group** for two thoroughly diagnosed reports (#466, #467), and to **カタカナ** (Discord) for the
+Duplicate suggestion.
 
 ### Added
 

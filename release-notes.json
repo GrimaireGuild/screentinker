@@ -14,6 +14,16 @@
   ],
   "releases": [
     {
+      "version": "2.3.1",
+      "date": "2026-10-01",
+      "notes": [
+        "Duplicate any widget from the Widgets page: an independent copy opens straight in its editor, so three screens can show three menus without typing the first one in again. Templates also show how many widgets use them.",
+        "The Displays page shows each player's app version, marks Android players that are behind the version this server provides, and can filter by version. Choose which details the cards show under Card details.",
+        "Web and Raspberry Pi players no longer stop on one slide when the connection drops, and they pick up new player code after a server update without a manual reload.",
+        "After a slow first start, the server now waits and checks again for its video tools instead of turning video thumbnails off until the next restart."
+      ]
+    },
+    {
       "version": "2.3.0",
       "date": "2026-09-30",
       "notes": [
