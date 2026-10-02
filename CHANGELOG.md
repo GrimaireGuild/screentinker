@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.3.2
+
+A hotfix for 2.3.1. No outside code contributions in this release.
+
+### Fixed
+
+- **The Edit button vanished from every widget card (#469).** #463's *Duplicate* made the card's action
+  row Edit · Duplicate · History · Delete (~280 px), right-aligned inside a card that clips
+  (`overflow: hidden`) and auto-fills down to 200 px. A right-aligned row that does not fit spills out
+  of its LEFT edge, so the first button — Edit — was cut off; a 1500 px window put it at −23 px.
+  Every widget type was affected. The row now wraps. A test pins it.
+- **The native Raspberry Pi card said "Bookworm" (#470).** The `.deb` needs PySide6, packaged only
+  from Debian 13 "trixie" on, so apt refuses it on Bookworm. The card now says Trixie or newer and
+  points older Pi OS at the kiosk install.
+
 ## 2.3.1
 
 A patch release: duplicating widgets, the player version on every Displays card, two web/Pi player

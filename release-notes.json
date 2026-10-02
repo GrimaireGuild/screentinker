@@ -14,6 +14,14 @@
   ],
   "releases": [
     {
+      "version": "2.3.2",
+      "date": "2026-10-01",
+      "notes": [
+        "The Edit button is back on every widget card. Adding Duplicate made the row of buttons too wide for narrow cards, which hid Edit; the buttons now wrap onto a second line instead.",
+        "The download page now says the native Raspberry Pi player needs Raspberry Pi OS 13 (Trixie) or newer, and points older Pi OS at the kiosk install."
+      ]
+    },
+    {
       "version": "2.3.1",
       "date": "2026-10-01",
       "notes": [
