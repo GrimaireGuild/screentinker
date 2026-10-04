@@ -451,7 +451,9 @@ function sendMarkdown(req, res, file, canonicalPath) {
   try {
     const html = fs.readFileSync(file, 'utf8');
     res.type('text/markdown; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=900');
+    // Never cached, by the edge or anyone else: agents always read the current page. Safe only because
+    // `.md` is its own URL; the HTML page URL keeps its edge caching.
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Link', aiSurface.linkHeader(base));
     return res.send(mdRendition.toMarkdown(html, { url: base + canonicalPath, origin: base }));
   } catch (e) {

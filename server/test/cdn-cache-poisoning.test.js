@@ -70,11 +70,11 @@ test('the HTML on the same URL is still what a browser gets, and stays cacheable
   assert.ok(sharedCacheable(r.headers.get('cache-control')), 'the page itself must keep its edge caching');
 });
 
-test('the .md URL is its own URL, so it keeps public caching', async () => {
+test('the .md URL is its own URL, and is never cached', async () => {
   const r = await get(GUIDE.replace(/\.html$/, '.md'));
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /text\/markdown/);
-  assert.match(r.headers.get('cache-control') || '', /public/);
+  assert.match(r.headers.get('cache-control') || '', /no-store/);
 });
 
 test('⚠️ a missing asset is a 404 that is not cached, never the app shell with a 200', async () => {
