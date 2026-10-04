@@ -190,9 +190,13 @@ function folderSetsFor(db, playlist, rules) {
  * The content rows a playlist's rules select right now: playable (active, unexpired), in the
  * playlist's own workspace, sorted and capped. Returns [] for a playlist without rules.
  */
-function matchContent(db, playlist, rulesOverride) {
-  const rules = rulesOverride || parseRules(playlist && playlist.smart_rules);
-  if (!rules) return [];
+// One refresh resolves every smart playlist of a workspace back to back; they share one read of the
+// workspace's content instead of each re-reading (and re-parsing) the whole library.
+let contentCache = null;
+
+function playableRows(db, playlist) {
+  const key = playlist.workspace_id ? `w:${playlist.workspace_id}` : `u:${playlist.user_id}`;
+  if (contentCache && contentCache.has(key)) return contentCache.get(key);
   const rows = playlist.workspace_id
     ? db.prepare(`SELECT * FROM content WHERE workspace_id = ?
                     AND COALESCE(is_active, 1) = 1
@@ -200,6 +204,14 @@ function matchContent(db, playlist, rulesOverride) {
     : db.prepare(`SELECT * FROM content WHERE workspace_id IS NULL AND user_id = ?
                     AND COALESCE(is_active, 1) = 1
                     AND (expires_at IS NULL OR expires_at > strftime('%s','now'))`).all(playlist.user_id);
+  if (contentCache) contentCache.set(key, rows);
+  return rows;
+}
+
+function matchContent(db, playlist, rulesOverride) {
+  const rules = rulesOverride || parseRules(playlist && playlist.smart_rules);
+  if (!rules) return [];
+  const rows = playableRows(db, playlist);
   const ctx = { folderSets: folderSetsFor(db, playlist, rules) };
   const hits = rows.filter((c) => contentMatches(rules, c, ctx));
   return sortRows(hits, rules.sort).slice(0, rules.limit);
@@ -248,43 +260,94 @@ function snapshotItems(db, playlist) {
 }
 
 /*
- * Republish every PUBLISHED smart playlist in a workspace after its content changed. A draft is left
- * alone: its owner is mid-edit and has not chosen to put anything live. Debounced per workspace so a
- * 50-file upload republishes once, not 50 times.
+ * Re-resolve smart playlists after content changed, and put the result live.
+ *
+ * ⚠️ EVERY GENUINE CHANGE RESTARTS SCREENS AT ITEM 1 (the player fingerprint is structural), so the
+ * refresh is a TRAILING debounce: it waits for content writes to go quiet, so an operator tagging
+ * twenty items one by one restarts the screens once, not twenty times. MAX_WAIT bounds it, so a
+ * steady trickle of writes still lands.
+ *
+ * What gets republished:
+ *   - every PUBLISHED smart playlist in the workspace, and
+ *   - the published PARENTS of a smart playlist that was never published itself. A parent flattens
+ *     its children's live state, so a draft smart child is on screens through its parent and must
+ *     keep that copy current.
+ * A draft smart playlist on its own is left alone: nothing of it is live.
+ *
+ * ⚠️ APPROVAL-GATED workspaces publish only what someone approved, so there an automatic refresh
+ * may only REMOVE items (expired, deactivated, deleted, untagged content must come off screens; the
+ * #157 sweep does the same for ordinary playlists). A refresh that would ADD anything waits for a
+ * normal approved release.
+ *
+ * ⚠️ LOCAL ROWS ONLY. A workspace copied from another node (scale-out) is the primary's to publish;
+ * a replica that republished it would fight the primary's snapshot on every sweep.
  */
 const pending = new Map();
-const DEBOUNCE_MS = 1500;
+const QUIET_MS = 10 * 1000;
+const MAX_WAIT_MS = 60 * 1000;
 
-// ⚠️ LOCAL ROWS ONLY. A workspace copied from another node (scale-out) is the primary's to publish;
-// a replica that republished it would fight the primary's snapshot on every sweep.
-function refreshNow(db, publish, workspaceId) {
+function contentIdsOf(snapshotJson) {
+  try { return new Set((JSON.parse(snapshotJson || '[]') || []).map((i) => i && i.content_id).filter(Boolean)); }
+  catch (_) { return null; }
+}
+
+function refreshNow(db, publish, workspaceId, opts = {}) {
   const { LOCAL_ROWS_SQL } = require('./replica-proxy');
-  const base = `SELECT id, workspace_id FROM playlists p WHERE p.smart_rules IS NOT NULL AND p.status = 'published' AND ${LOCAL_ROWS_SQL('p')}`;
-  const rows = workspaceId
-    ? db.prepare(`${base} AND p.workspace_id = ?`).all(workspaceId)
-    : db.prepare(base).all();
-  let changed = 0;
-  // ⚠️ An approval-gated workspace publishes only what someone approved. Auto-refresh would put
-  // newly matching content live past that gate, so there the playlist waits for a normal release.
   const policy = require('./release-policy');
+  const build = opts.build || ((id) => require('../routes/playlists').buildSnapshotItems(id));
+  const scope = workspaceId ? ' AND p.workspace_id = ?' : '';
+  const args = workspaceId ? [workspaceId] : [];
+
+  const targets = new Map();   // playlist id -> workspace id
+  for (const r of db.prepare(`SELECT p.id, p.workspace_id FROM playlists p
+                               WHERE p.smart_rules IS NOT NULL AND p.status = 'published'
+                                 AND ${LOCAL_ROWS_SQL('p')}${scope}`).all(...args)) targets.set(r.id, r.workspace_id);
+  for (const r of db.prepare(`SELECT DISTINCT parent.id, parent.workspace_id
+                                FROM playlists p
+                                JOIN playlist_items pi ON pi.child_playlist_id = p.id
+                                JOIN playlists parent ON parent.id = pi.playlist_id
+                               WHERE p.smart_rules IS NOT NULL AND p.status != 'published'
+                                 AND parent.status = 'published'
+                                 AND ${LOCAL_ROWS_SQL('p')}${scope}`).all(...args)) targets.set(r.id, r.workspace_id);
+
   const gated = new Map();
-  for (const r of rows) {
-    if (!gated.has(r.workspace_id)) gated.set(r.workspace_id, !!(r.workspace_id && policy.approvalRequired(db, r.workspace_id)));
-    if (gated.get(r.workspace_id)) continue;
-    try { if (publish(r.id).changed) changed++; } catch (e) { console.warn(`[smart-playlist] refresh ${r.id} failed: ${e && e.message}`); }
+  // One `seen` for the whole refresh: two smart children of one parent republish that parent ONCE
+  // (the first republish already flattens both children's live state).
+  const seen = new Set();
+  let changed = 0;
+  contentCache = new Map();
+  try {
+    for (const [id, ws] of targets) {
+      if (seen.has(id)) continue;
+      if (!gated.has(ws)) gated.set(ws, !!(ws && policy.approvalRequired(db, ws)));
+      if (gated.get(ws)) {
+        const row = db.prepare('SELECT published_snapshot FROM playlists WHERE id = ?').get(id);
+        const before = contentIdsOf(row && row.published_snapshot);
+        const after = new Set(build(id).map((i) => i && i.content_id).filter(Boolean));
+        const addsSomething = !before || [...after].some((cid) => !before.has(cid));
+        if (addsSomething) continue;
+      }
+      seen.add(id);
+      try { if (publish(id, seen).changed) changed++; } catch (e) { console.warn(`[smart-playlist] refresh ${id} failed: ${e && e.message}`); }
+    }
+  } finally {
+    contentCache = null;
   }
-  return { checked: rows.length, changed };
+  return { checked: targets.size, changed };
 }
 
 function scheduleRefresh(db, publish, workspaceId) {
   const key = workspaceId || '*';
-  if (pending.has(key)) return;
-  const t = setTimeout(() => {
+  const now = Date.now();
+  const entry = pending.get(key) || { first: now, timer: null };
+  if (entry.timer) clearTimeout(entry.timer);
+  const wait = Math.max(0, Math.min(QUIET_MS, entry.first + MAX_WAIT_MS - now));
+  entry.timer = setTimeout(() => {
     pending.delete(key);
     try { refreshNow(db, publish, workspaceId); } catch (e) { console.warn(`[smart-playlist] refresh failed: ${e && e.message}`); }
-  }, DEBOUNCE_MS);
-  if (t.unref) t.unref();
-  pending.set(key, t);
+  }, wait);
+  if (entry.timer.unref) entry.timer.unref();
+  pending.set(key, entry);
 }
 
 // Wiring for the live server: server.js hands over the socket server once, and every content write
@@ -292,8 +355,8 @@ function scheduleRefresh(db, publish, workspaceId) {
 let liveIo = null;
 let started = false;
 
-function defaultPublish(id) {
-  return require('../routes/playlists').publishPlaylist(id, liveIo);
+function defaultPublish(id, seen) {
+  return require('../routes/playlists').publishPlaylist(id, liveIo, seen);
 }
 
 function notifyContentChanged(workspaceId) {
@@ -314,7 +377,19 @@ function start(io) {
   if (t.unref) t.unref();
 }
 
+// Every route that adds a hand-made item calls this first. An item added to a smart playlist is
+// stored, answered 201, and never plays, because the snapshot comes from the rules.
+const SMART_ADD_ERROR = 'This is a smart playlist: its items come from its rules. Change the rules, or tag the content so it matches.';
+function smartAddError(db, playlistId) {
+  if (!playlistId) return null;
+  try {
+    const r = db.prepare('SELECT smart_rules FROM playlists WHERE id = ?').get(playlistId);
+    return r && r.smart_rules ? SMART_ADD_ERROR : null;
+  } catch (_) { return null; }
+}
+
 module.exports = {
+  smartAddError, SMART_ADD_ERROR,
   normalizeRules, parseRules, contentMatches, contentType, matchContent, snapshotItems,
   refreshNow, scheduleRefresh, notifyContentChanged, start, FIELDS, TYPES, OPS, MAX_LIMIT,
 };

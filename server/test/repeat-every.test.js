@@ -46,6 +46,20 @@ test('two flagged items are staggered, never stacked back to back', () => {
   }
 });
 
+test('⚠️ copies are renumbered: a player that re-sorts by sort_order keeps the spacing', () => {
+  const list = Array.from({ length: 6 }, (_, i) => item(`s${i}`, 10, { sort_order: i }));
+  list.push(item('promo', 10, { sort_order: 6, repeat_every_sec: 20 }));
+  const out = applyRepeatEvery(list);
+  const resorted = out.slice().sort((a, b) => a.sort_order - b.sort_order);   // what Tizen does
+  assert.deepEqual(resorted.map((i) => i.filename), out.map((i) => i.filename));
+  assert.ok(gaps(resorted, 'promo').every((g) => g <= 40), 'still spaced after the re-sort');
+});
+
+test('a flagged open-ended live stream is not woven (each copy would park the screen)', () => {
+  const list = [item('a'), item('b'), item('live', 0, { mime_type: 'video/hls', repeat_every_sec: 30 })];
+  assert.equal(applyRepeatEvery(list).filter((i) => i.filename === 'live').length, 1);
+});
+
 test('no flag, no change: same array, field stripped, order intact', () => {
   const list = [item('a'), item('b'), item('c')];
   const out = applyRepeatEvery(list);

@@ -40,7 +40,7 @@ function forkInheritedPlaylist(deviceId, userId) {
   if (!resolved.playlist_id || resolved.source === 'device' || resolved.source === 'schedule') return null;
 
   const device = db.prepare('SELECT workspace_id, name FROM devices WHERE id = ?').get(deviceId);
-  const source = db.prepare('SELECT name, status, published_snapshot, published_structure, playback_order, published_playback_order FROM playlists WHERE id = ?')
+  const source = db.prepare('SELECT name, status, published_snapshot, published_structure, playback_order, published_playback_order, smart_rules FROM playlists WHERE id = ?')
     .get(resolved.playlist_id);
   if (!source) return null;
 
@@ -58,6 +58,21 @@ function forkInheritedPlaylist(deviceId, userId) {
     db.prepare('UPDATE playlists SET playback_order = ?, published_playback_order = ? WHERE id = ?')
       .run(source.playback_order || 'sequential', source.published_playback_order || null, newId);
 
+    /*
+     * ⚠️ A SMART source has no items to copy: its content comes from its rules. Copying nothing
+     * would leave the fork's draft holding only the item being added, and its next publish would
+     * take the screen from the whole rule-selected set down to that one item, forever detached from
+     * the rules. Instead the fork NESTS the smart playlist, so the screen keeps the live rule set and
+     * gains its own items around it (smart playlists hold no children, so one level is respected).
+     */
+    if (source.smart_rules) {
+      db.prepare('INSERT INTO playlist_items (playlist_id, child_playlist_id, sort_order, duration_sec) VALUES (?, ?, 0, 10)')
+        .run(newId, resolved.playlist_id);
+      db.prepare('UPDATE playlists SET published_structure = ? WHERE id = ?')
+        .run(JSON.stringify([{ content_id: null, widget_id: null, child_playlist_id: resolved.playlist_id, zone_id: null, sort_order: 0, duration_sec: 10, muted: 0, play_from: null, play_until: null, enabled: 1, log_play: 1, fit_mode: null, play_when: null, weight: 1 }]), newId);
+      db.prepare("UPDATE devices SET playlist_id = ?, playlist_source = 'device' WHERE id = ?").run(newId, deviceId);
+      return;
+    }
     // Every column, including child_playlist_id and muted: a fork that quietly drops nesting or
     // un-mutes an item is not a copy of what the screen was showing.
     const items = db.prepare(`SELECT id, content_id, widget_id, child_playlist_id, zone_id, sort_order,

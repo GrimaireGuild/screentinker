@@ -144,7 +144,8 @@ test('⚠️ tagging content republishes a PUBLISHED smart playlist by itself; a
   const put = await api(`/api/content/${cid}`, J(A.jwt, { tags: ['promo'] }, 'PUT'));
   assert.equal(put.status, 200, JSON.stringify(put.body));
   let snap;
-  for (let i = 0; i < 20; i++) {
+  // The refresh is a trailing debounce (10s of quiet, lib/smart-playlist.js), so allow ~15s.
+  for (let i = 0; i < 60; i++) {
     await sleep(250);
     snap = snapshot(live.id);
     if (snap && snap.length === 2) break;
@@ -213,4 +214,73 @@ test('the interval survives duplicate and discard', async () => {
   await api(`/api/playlists/${pl.id}/discard`, J(A.jwt, {}));
   const items = (await api(`/api/playlists/${pl.id}`, J(A.jwt, undefined, 'GET'))).body.items;
   assert.equal(items.filter((i) => i.repeat_every_sec === 60).length, 2, 'both the original and its duplicate kept 60s');
+});
+
+const waitFor = async (fn, ms = 16000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(250); }
+  return fn();
+};
+const setTags = (cid, tags) => api(`/api/content/${cid}`, J(A.jwt, { tags }, 'PUT'));
+
+test('⚠️ nesting renumbers sort_order: players that re-sort keep the parent\'s order', async () => {
+  const child = (await api('/api/playlists', J(A.jwt, { name: 'Order child', smart_rules: LOBBY }))).body;
+  const parent = (await api('/api/playlists', J(A.jwt, { name: 'Order parent' }))).body;
+  await api(`/api/playlists/${parent.id}/items`, J(A.jwt, { content_id: addContent(A, 'first.png'), duration_sec: 5 }));
+  await api(`/api/playlists/${parent.id}/items`, J(A.jwt, { child_playlist_id: child.id }));
+  await api(`/api/playlists/${parent.id}/items`, J(A.jwt, { content_id: addContent(A, 'last.png'), duration_sec: 5 }));
+  await api(`/api/playlists/${parent.id}/publish`, J(A.jwt, {}));
+  const snap = snapshot(parent.id);
+  const resorted = snap.slice().sort((a, b) => a.sort_order - b.sort_order).map((i) => i.filename);
+  assert.deepEqual(resorted, names(snap), 'sorting by sort_order (as Tizen does) changes nothing');
+  assert.equal(names(snap)[0], 'first.png');
+  assert.equal(names(snap).at(-1), 'last.png');
+});
+
+test('a never-published smart child keeps its published parent current', async () => {
+  const child = (await api('/api/playlists', J(A.jwt, { name: 'Draft child', smart_rules: { rules: [{ field: 'tag', op: 'has', value: 'news' }] } }))).body;
+  const parent = (await api('/api/playlists', J(A.jwt, { name: 'Live parent' }))).body;
+  addContent(A, 'news-1.png', { tags: ['news'] });
+  await api(`/api/playlists/${parent.id}/items`, J(A.jwt, { child_playlist_id: child.id }));
+  await api(`/api/playlists/${parent.id}/publish`, J(A.jwt, {}));
+  assert.deepEqual(names(snapshot(parent.id)), ['news-1.png']);
+  const cid = addContent(A, 'news-2.png');
+  await setTags(cid, ['news']);
+  const snap = await waitFor(() => { const s = snapshot(parent.id); return s && s.length === 2 ? s : null; });
+  assert.deepEqual(names(snap), ['news-1.png', 'news-2.png']);
+  assert.equal(snapshot(child.id), null, 'the child itself stays unpublished');
+});
+
+test('⚠️ approval-gated workspace: a refresh may REMOVE matches, never ADD them', async () => {
+  const G = await register('gated');
+  addContent(G, 'g-keep.png', { tags: ['promo'] });
+  const drop = addContent(G, 'g-drop.png', { tags: ['promo'] });
+  const pl = (await api('/api/playlists', J(G.jwt, { name: 'Gated', smart_rules: { rules: [{ field: 'tag', op: 'has', value: 'promo' }] } }))).body;
+  assert.equal((await api(`/api/playlists/${pl.id}/publish`, J(G.jwt, {}))).status, 200);
+  assert.deepEqual(names(snapshot(pl.id)), ['g-drop.png', 'g-keep.png']);
+  const raw = dbHandle(); raw.prepare('UPDATE workspaces SET require_approval = 1 WHERE id = ?').run(G.workspaceId); raw.close();
+
+  // Addition: tagged new content must NOT go live without an approved release.
+  const added = addContent(G, 'g-new.png');
+  assert.equal((await api(`/api/content/${added}`, J(G.jwt, { tags: ['promo'] }, 'PUT'))).status, 200);
+  await sleep(12000);
+  assert.deepEqual(names(snapshot(pl.id)), ['g-drop.png', 'g-keep.png'], 'the addition waits for approval');
+
+  // Removal: untag one published item (and withdraw the pending addition). The result only removes,
+  // so it goes live by itself: content taken off a gated workspace's screens must not wait.
+  await api(`/api/content/${added}`, J(G.jwt, { tags: [] }, 'PUT'));
+  await api(`/api/content/${drop}`, J(G.jwt, { tags: [] }, 'PUT'));
+  const snap = await waitFor(() => { const s = snapshot(pl.id); return s && s.length === 1 ? s : null; });
+  assert.deepEqual(names(snap), ['g-keep.png'], 'the removal went live without an approval');
+});
+
+test('hand-adding through other routes is refused on a smart playlist', async () => {
+  const pl = (await api('/api/playlists', J(A.jwt, { name: 'Guarded', smart_rules: LOBBY }))).body;
+  const cid = addContent(A, 'guard.png');
+  const paste = await api(`/api/playlists/${pl.id}/items/selection`, J(A.jwt, { action: 'paste', items: [{ content_id: cid, duration_sec: 10 }] }));
+  assert.equal(paste.status, 400);
+  const normal = (await api('/api/playlists', J(A.jwt, { name: 'Has child' }))).body;
+  await api(`/api/playlists/${normal.id}/items`, J(A.jwt, { child_playlist_id: pl.id }));
+  const toSmart = await api(`/api/playlists/${normal.id}`, J(A.jwt, { smart_rules: LOBBY }, 'PUT'));
+  assert.equal(toSmart.status, 400, 'a playlist that nests others cannot become smart');
 });

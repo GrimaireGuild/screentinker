@@ -3467,7 +3467,7 @@ export default {
   'smart.by_rules': 'By rules',
   'smart.edit_rules': 'Edit rules',
   'smart.panel_title': 'Smart playlist',
-  'smart.panel_hint': 'Once published, this playlist updates on its own when content is added, tagged, expired or deleted. Rule changes go live when you publish. In workspaces that require approval, updates wait for a normal release.',
+  'smart.panel_hint': 'Once published, this playlist updates on its own when content is added, tagged, expired or deleted. Rule changes go live when you publish. In workspaces that require approval, newly matching content waits for an approved release; content that stops matching comes off screens straight away.',
   'smart.empty': 'Nothing matches these rules yet.',
   'smart.empty_hint': 'Tag some content in the library, or change the rules.',
   'smart.toast.saved': 'Rules saved. Publish to put them on screens.',

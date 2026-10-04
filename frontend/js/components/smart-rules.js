@@ -57,8 +57,14 @@ export async function loadFolders() {
  * Open the editor. `onSave(rules)` must return a promise; the modal closes when it resolves and
  * stays open (showing the error) when it rejects.
  */
-export async function openSmartRulesModal({ title, initial, saveLabel, onSave }) {
-  const folders = await loadFolders();
+let modalOpen = false;
+
+export async function openSmartRulesModal({ title, initial, saveLabel, onSave, onCancel }) {
+  // The folder fetch happens before anything is shown, so a double click would open two modals.
+  if (modalOpen) return;
+  modalOpen = true;
+  let folders;
+  try { folders = await loadFolders(); } catch { folders = []; }
   const state = JSON.parse(JSON.stringify(initial || DEFAULT_RULES));
   if (!Array.isArray(state.rules) || !state.rules.length) state.rules = [{ field: 'tag', op: 'has', value: '' }];
 
@@ -105,6 +111,12 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
     </div>`;
   document.body.appendChild(modal);
   const $ = (id) => modal.querySelector('#' + id);
+  let saved = false;
+  function close() {
+    modal.remove();
+    modalOpen = false;
+    if (!saved && typeof onCancel === 'function') onCancel();
+  }
   $('smMatch').value = state.match === 'any' ? 'any' : 'all';
   $('smSort').value = state.sort || 'name';
   $('smLimit').value = state.limit || 200;
@@ -136,10 +148,11 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
         ${valueInput(r, i)}
         <button class="btn btn-secondary btn-sm sm-del" data-i="${i}" title="${esc(t('smart.remove_rule'))}" ${state.rules.length < 2 ? 'disabled' : ''}>✕</button>
       </div>`).join('');
-    // A select's first option is what the operator sees, so keep state in step with it.
+    // What a select DISPLAYS is what gets saved. A stored value that is no longer an option (a deleted
+    // folder) would otherwise show one folder while silently keeping another.
     state.rules.forEach((r, i) => {
       const v = modal.querySelector(`select.sm-value[data-i="${i}"]`);
-      if (v && !r.value) r.value = v.value;
+      if (v && v.value !== r.value) r.value = v.value;
     });
   }
 
@@ -152,7 +165,12 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
       rules: state.rules.map((r) => {
         const out = { field: r.field, op: r.op };
         if (r.field === 'meta') out.key = (r.key || '').trim();
-        if (!(r.field === 'meta' && (r.op === 'exists' || r.op === 'missing'))) out.value = String(r.value || '').trim();
+        if (!(r.field === 'meta' && (r.op === 'exists' || r.op === 'missing'))) {
+          let v = String(r.value || '').trim();
+          // Tags are shown as "#lobby" everywhere, so people type the '#'. Stored tags never have one.
+          if (r.field === 'tag') v = v.replace(/^#+/, '').toLowerCase();
+          out.value = v;
+        }
         return out;
       }),
     };
@@ -168,12 +186,14 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
     clearTimeout(previewTimer);
     previewTimer = setTimeout(async () => {
       const rules = collect();
+      // Bump first, so a request already in flight for the old rules cannot land on top of this.
+      const seq = ++previewSeq;
+      $('smError').textContent = '';
       if (incomplete(rules)) {
         $('smCount').textContent = t('smart.preview_incomplete');
         $('smPreview').innerHTML = '';
         return;
       }
-      const seq = ++previewSeq;
       try {
         const r = await api.smartPlaylistPreview(rules);
         if (seq !== previewSeq) return;
@@ -210,8 +230,12 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
     else if (!['smLimit', 'smImage'].includes(e.target.id)) return;
     schedulePreview();
   });
+  // Close on the backdrop only when the press started there: selecting text in an input and releasing
+  // over the backdrop fires a click on it, and must not throw away the rules being written.
+  let downOnBackdrop = false;
+  modal.addEventListener('mousedown', (e) => { downOnBackdrop = e.target === modal; });
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) { modal.remove(); return; }
+    if (e.target === modal) { if (downOnBackdrop) close(); return; }
     const del = e.target.closest('.sm-del');
     if (del && state.rules.length > 1) {
       state.rules.splice(Number(del.dataset.i), 1);
@@ -225,7 +249,7 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
     paintRules();
     schedulePreview();
   });
-  $('smCancel').addEventListener('click', () => modal.remove());
+  $('smCancel').addEventListener('click', () => close());
   $('smSave').addEventListener('click', async () => {
     const rules = collect();
     if (incomplete(rules)) { $('smError').textContent = t('smart.preview_incomplete'); return; }
@@ -233,7 +257,8 @@ export async function openSmartRulesModal({ title, initial, saveLabel, onSave })
     btn.disabled = true;
     try {
       await onSave(rules);
-      modal.remove();
+      saved = true;
+      close();
     } catch (err) {
       $('smError').textContent = err.message;
       btn.disabled = false;

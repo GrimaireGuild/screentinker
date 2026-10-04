@@ -214,11 +214,17 @@ function buildSnapshotItems(playlistId, _depth = 0, _ancestors = null) {
     console.warn(`[playlist] nesting cycle at ${playlistId} — reference dropped`);
     return [];
   }
-  // SELECT *: the embedded build's playlists table is a subset, and must not need these columns.
-  const own = db.prepare('SELECT * FROM playlists WHERE id = ?').get(playlistId);
+  // Named columns, not *: this runs for every build (children included), and * would drag the large
+  // published_snapshot blob along each time. user_id is read only for a smart playlist, because the
+  // embedded build's playlists table has no such column.
+  const own = db.prepare('SELECT id, workspace_id, smart_rules, playback_order FROM playlists WHERE id = ?').get(playlistId);
   // A smart playlist's items come from its rules, never from playlist_items. Same output shape, so
   // nesting, publish and the players cannot tell the difference (lib/smart-playlist.js).
-  if (own && own.smart_rules) return smartPlaylist.snapshotItems(db, own);
+  if (own && own.smart_rules) {
+    let userId = null;
+    try { userId = (db.prepare('SELECT user_id FROM playlists WHERE id = ?').get(playlistId) || {}).user_id || null; } catch (_) { userId = null; }
+    return smartPlaylist.snapshotItems(db, { ...own, user_id: userId });
+  }
   const items = db.prepare(`
     SELECT pi.id AS _iid, pi.content_id, pi.widget_id, pi.child_playlist_id, pi.zone_id, pi.sort_order, pi.duration_sec, pi.muted,
            pi.play_from, pi.play_until, pi.enabled, pi.log_play, pi.fit_mode, pi.play_when, pi.weight, pi.repeat_every_sec,
@@ -333,6 +339,13 @@ function expandChildPlaylists(items, depth, ancestors) {
       out.push(merged);
     }
   }
+  /*
+   * ⚠️ Renumber: an expanded child keeps ITS OWN sort_order (0..n), which collides with the
+   * parent's, and Tizen re-sorts every playlist by sort_order (the web player, Android and native
+   * do per zone). Without this a nested child's items get shuffled in among the parent's on those
+   * players. Only reached when a child was actually expanded, so a flat playlist is byte-identical.
+   */
+  out.forEach((it, i) => { it.sort_order = i; });
   return out;
 }
 
@@ -726,6 +739,19 @@ router.put('/:id', requirePlaylistWrite, (req, res) => {
   }
   let rulesChanged = false;
   if (req.body.smart_rules !== undefined) {
+    // A generated playlist (a slide deck's, a schedule's throwaway) is rebuilt by its owner; rules
+    // there would silently override what that owner publishes.
+    if (req.body.smart_rules !== null && req.playlist.is_auto_generated) {
+      return res.status(400).json({ error: 'Auto-generated playlists cannot become smart playlists' });
+    }
+    if (req.body.smart_rules !== null) {
+      let deck = null;
+      try { deck = db.prepare('SELECT 1 FROM slide_decks WHERE playlist_id = ? LIMIT 1').get(req.params.id); } catch (_) { deck = null; }
+      if (deck) return res.status(400).json({ error: 'A slide deck\'s playlist cannot become a smart playlist' });
+      // A smart playlist has no items of its own, so one that holds a nested playlist would drop it.
+      const kid = db.prepare('SELECT 1 FROM playlist_items WHERE playlist_id = ? AND child_playlist_id IS NOT NULL LIMIT 1').get(req.params.id);
+      if (kid) return res.status(400).json({ error: 'Remove the nested playlists first: a smart playlist cannot contain other playlists' });
+    }
     // null turns a smart playlist back into an ordinary one (its hand-added items, if any, return).
     const rules = smartPlaylist.normalizeRules(req.body.smart_rules);
     if (rules === false) return res.status(400).json({ error: SMART_RULES_ERROR });
@@ -1367,6 +1393,7 @@ router.post('/:id/items/selection', requirePlaylistWrite, (req, res) => {
   if (!SELECTION_ACTIONS.has(action)) {
     return res.status(400).json({ error: 'action must be one of ' + [...SELECTION_ACTIONS].join(', ') });
   }
+  if (req.playlist.smart_rules) return res.status(400).json({ error: smartPlaylist.SMART_ADD_ERROR });
   const ws = req.playlist.workspace_id;
   try {
     if (action === 'paste') {

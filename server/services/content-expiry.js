@@ -58,7 +58,7 @@ function sweepExpiredContent(socketIo = io) {
   try {
     const smart = require('../lib/smart-playlist');
     const spaces = db.prepare(`SELECT DISTINCT workspace_id FROM content WHERE id IN (${ph})`).all(...expired);
-    for (const w of spaces) smart.refreshNow(db, (id) => publishPlaylist(id, socketIo), w.workspace_id);
+    for (const w of spaces) smart.refreshNow(db, (id, seen) => publishPlaylist(id, socketIo, seen), w.workspace_id);
   } catch (e) { console.error('[content-expiry] smart playlist refresh failed', e); }
 
   console.log(`[content-expiry] deactivated ${expired.length} item(s), republished ${affected.length} playlist(s)`);

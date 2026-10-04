@@ -18,6 +18,7 @@
  */
 
 const MAX_OUTPUT = 1000;
+const MAX_FLAGGED = 50;     // per zone; beyond this the weave is skipped rather than run at O(n^3)
 const MAX_LOOPS = 24;
 const DEFAULT_SEC = 10;
 
@@ -29,21 +30,27 @@ function itemSeconds(it) {
   return DEFAULT_SEC;
 }
 
+function isOpenEnded(it) {
+  return Number(it && it.duration_sec) === 0 && /^video\/(hls|rtsp)$/.test(String((it && it.mime_type) || ''));
+}
+
 function everyOf(it) {
+  // A stream that stays until skipped cannot be woven in: every copy would park the screen on it.
+  if (isOpenEnded(it)) return 0;
   const n = Number(it && it.repeat_every_sec);
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 0;
 }
 
 // A live stream with dwell 0 stays until skipped, so it has no duration to space against.
 function hasOpenEndedItem(items) {
-  return items.some((it) => Number(it.duration_sec) === 0 && /^video\/(hls|rtsp)$/.test(String(it.mime_type || '')));
+  return items.some(isOpenEnded);
 }
 
 function weaveZone(items) {
   const base = items.filter((it) => !everyOf(it));
   const reps = items.filter((it) => everyOf(it));
   // Nothing to weave into (every item is flagged), or no way to measure time: play the list as is.
-  if (!reps.length || !base.length || hasOpenEndedItem(base)) return items;
+  if (!reps.length || !base.length || reps.length > MAX_FLAGGED || hasOpenEndedItem(base)) return items;
 
   const loopSec = base.reduce((s, it) => s + itemSeconds(it), 0);
 
@@ -73,12 +80,11 @@ function weaveZone(items) {
     let lastB = -1;
     for (let k = 0; k < n; k++) {
       const t = offset + k * step;
-      let b = 0;
-      let best = Infinity;
-      for (let i = 0; i < starts.length; i++) {
-        const dist = Math.abs(starts[i] - t);
-        if (dist < best) { best = dist; b = i; }
-      }
+      // starts[] is ascending: binary-search the nearest boundary.
+      let lo = 0, hi = starts.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] < t) lo = mid + 1; else hi = mid; }
+      let b = lo;
+      if (b > 0 && Math.abs(starts[b - 1] - t) <= Math.abs(starts[b] - t)) b = b - 1;
       if (b <= lastB) b = lastB + 1;              // never two copies at one boundary
       if (b >= seq.length) break;
       inserts[b].push(r);
@@ -114,7 +120,12 @@ function applyRepeatEvery(items) {
   for (const list of zones.values()) {
     for (const it of weaveZone(list)) out.push({ ...it });
   }
-  for (const it of out) delete it.repeat_every_sec;
+  /*
+   * ⚠️ RENUMBER sort_order. Every copy of an item carries the source row's sort_order, and the
+   * players re-sort by it (Tizen always; the web player, Android and native per zone), which would
+   * pull every copy back next to the original and undo the weave. The flat array order is the truth.
+   */
+  out.forEach((it, i) => { delete it.repeat_every_sec; it.sort_order = i; });
   return out;
 }
 
