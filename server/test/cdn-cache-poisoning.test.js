@@ -6,8 +6,8 @@
 //
 // Reproduced on screentinker.com 2026-10-04: one `Accept: text/markdown` fetch of a guide page was
 // stored as `public, max-age=900`, and the next ordinary browser request for that URL got raw
-// markdown back as a cache HIT. These tests boot the real server and check the headers that decide
-// whether a shared cache may keep each kind of answer.
+// markdown back as a cache HIT. These tests boot the real server and check that each URL has one
+// answer, and that a miss is never cached as a success.
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -48,13 +48,18 @@ after(() => { try { proc.kill('SIGKILL'); } catch { /* */ } });
 
 const get = (p, accept) => fetch(BASE + p, { headers: accept ? { Accept: accept } : {}, redirect: 'manual' });
 
-test('⚠️ markdown negotiated on an HTML URL is never stored by a shared cache', async () => {
+test('⚠️ an HTML URL answers HTML whatever Accept says: one answer per URL', async () => {
+  // `private, no-store` on a negotiated reply is NOT enough: the zone's cache rule for the marketing
+  // pages overrides origin headers, and the edge cached a no-store markdown reply on alpha anyway.
   for (const p of [GUIDE, '/']) {
-    const r = await get(p, 'text/markdown');
-    assert.equal(r.status, 200, p);
-    assert.match(r.headers.get('content-type'), /text\/markdown/, `${p} still negotiates`);
-    const cc = r.headers.get('cache-control');
-    assert.ok(!sharedCacheable(cc), `${p}: a markdown reply on the HTML URL must be private/no-store, got "${cc}"`);
+    for (const accept of ['text/markdown', 'text/x-markdown', 'text/markdown;q=0.9,text/html;q=0.8']) {
+      const r = await get(p, accept);
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get('content-type'), /text\/html/, `${p} with Accept "${accept}" must get the page`);
+      assert.ok(!/accept(?!-)/i.test(r.headers.get('vary') || ''), `${p}: nothing varies by Accept any more`);
+    }
+    const link = (await get(p, BROWSER_ACCEPT)).headers.get('link') || '';
+    assert.match(link, /\.md>/, `${p}: the page still tells an agent where its markdown lives`);
   }
 });
 

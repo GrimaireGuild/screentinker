@@ -427,41 +427,31 @@ app.get('/.well-known/auth.md', serveAuthMarkdown);
 
 
 /*
- * A Markdown rendition of any page we publish, two ways: `Accept: text/markdown` on the HTML URL, or
- * the same path with `.md` appended.
+ * A Markdown rendition of any page we publish, at the same path with `.md` appended.
  *
- * ⚠️ MOUNTED HERE: ABOVE app.get('/'), the static middleware AND the SPA catch-all. Below the
- * landing route the homepage could never negotiate, because Express matches in order and that
- * route answers first — it returned HTML to `Accept: text/markdown` and looked like the feature
- * simply not working. Below static or the catch-all, `.md` falls through to index.html with a
- * 200, which is this deployment's documented trap.
+ * ⚠️ ONLY AT ITS OWN URL. NEVER NEGOTIATED ON THE HTML URL. This used to answer `Accept:
+ * text/markdown` on the page URL itself, with `Vary: Accept`. Cloudflare ignores Vary (it honours it
+ * only for images, on paid plans) and keys on the URL alone, so one agent's fetch of a guide or of
+ * the homepage stored the markdown under the page URL and every browser after it got raw markdown
+ * as a cache HIT. Reproduced on screentinker.com and alpha 2026-10-04. Marking that reply
+ * `private, no-store` did NOT help: the zone's cache rule for the marketing pages overrides origin
+ * headers, and the edge cached the no-store reply all the same. Any answer that varies by request
+ * header on a URL that edge caches is poisonable, so there is only one answer per URL. Agents find
+ * the `.md` URL from the Link header on every page, and from llms.txt and robots.txt.
+ *
+ * ⚠️ MOUNTED HERE: ABOVE app.get('/'), the static middleware AND the SPA catch-all. Below static or
+ * the catch-all, `.md` falls through to index.html with a 200, which is this deployment's documented
+ * trap.
  *
  * Generated from the HTML on request rather than kept as files beside it: two copies of the same
  * prose drift, and the copy nobody looks at is the one that goes stale.
  */
-/*
- * ⚠️ A NEGOTIATED RENDITION MUST NEVER REACH A SHARED CACHE. `Vary: Accept` is not enough, because
- * Cloudflare ignores Vary (it honours it only for images, and only on paid plans) and keys on the
- * URL alone. A `public` markdown reply to `Accept: text/markdown` on /guides/x.html was stored under
- * that URL and served as HIT to every browser after it: one agent's fetch put raw markdown on the
- * page for every human for the life of the cache entry. Reproduced on screentinker.com, 2026-10-04.
- *
- * So the markdown answer on an HTML URL is `private, no-store`: the edge never stores it, and the
- * HTML stays the only thing cached there. The cost is that an agent asking for markdown on a URL the
- * edge already holds as HTML gets the HTML; the Link header on that HTML names the `.md` URL, which
- * is a different URL, so it caches normally and cannot collide with a page.
- */
-function sendMarkdown(req, res, file, canonicalPath, { negotiated = false } = {}) {
+function sendMarkdown(req, res, file, canonicalPath) {
   const base = aiSurface.origin(req);
   try {
     const html = fs.readFileSync(file, 'utf8');
     res.type('text/markdown; charset=utf-8');
-    if (negotiated) {
-      res.setHeader('Cache-Control', 'private, no-store');
-      res.setHeader('Vary', 'Accept');
-    } else {
-      res.setHeader('Cache-Control', 'public, max-age=900');
-    }
+    res.setHeader('Cache-Control', 'public, max-age=900');
     res.setHeader('Link', aiSurface.linkHeader(base));
     return res.send(mdRendition.toMarkdown(html, { url: base + canonicalPath, origin: base }));
   } catch (e) {
@@ -484,15 +474,11 @@ app.use((req, res, next) => {
   const base = aiSurface.origin(req);
   const file = aiSurface.markdownSource(config.frontendDir, req.path);
   if (file) {
-    // Advertise the rendition on the HTML response whether or not this request wanted it: a client
-    // that fetched the page learns the plain-text form exists without having to guess the URL.
+    // Advertise the rendition on the HTML response: a client that fetched the page learns the
+    // plain-text form exists, and where, without having to guess the URL.
     res.setHeader('Link', aiSurface.linkHeader(base, {
       markdownOf: (req.path === '/' ? '/index' : req.path.replace(/\.html$/, '')) + '.md',
     }));
-    res.setHeader('Vary', 'Accept');
-    if (aiSurface.prefersMarkdown(req.headers.accept)) {
-      return sendMarkdown(req, res, file, req.path, { negotiated: true });
-    }
   } else {
     res.setHeader('Link', aiSurface.linkHeader(base));
   }
