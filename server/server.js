@@ -2277,6 +2277,7 @@ startScheduler(io);
 // #157: auto-deactivate expired content + republish affected playlists
 const { startContentExpiry } = require('./services/content-expiry');
 startContentExpiry(io);
+require('./lib/smart-playlist').start(io);
 
 // Start alert service
 const { startAlertService } = require('./services/alerts');
