@@ -1,5 +1,18 @@
 const express = require('express');
 const router = express.Router();
+
+// Smart playlists select content by rule, so any successful content write can change what they
+// play. Notify once per write; lib/smart-playlist debounces per workspace and republishes only the
+// playlists whose matches actually changed.
+router.use((req, res, next) => {
+  // Not upload chunks: they change nothing until finalize, and finalize notifies via content-ingest.
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !req.path.startsWith('/uploads') && !req.path.endsWith('/bundle-preview')) {
+    res.on('finish', () => {
+      if (res.statusCode < 400) require('../lib/smart-playlist').notifyContentChanged(req.workspaceId);
+    });
+  }
+  next();
+});
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');

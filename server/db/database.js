@@ -3037,6 +3037,11 @@ try {
   // #talk/#go2rtc: optional per-org ICE (STUN/TURN) override as a JSON array [{urls,username?,credential?}].
   // NULL -> use the global go2rtc ice_servers. Lets an org bring its own TURN.
   try { db.prepare('ALTER TABLE organizations ADD COLUMN ice_servers TEXT').run(); console.log('[migrate] organizations.ice_servers added'); } catch (_) { /* present */ }
+  // Smart playlists (lib/smart-playlist.js): JSON rule set; NULL = an ordinary hand-built playlist.
+  try { db.prepare('ALTER TABLE playlists ADD COLUMN smart_rules TEXT').run(); console.log('[migrate] playlists.smart_rules added'); } catch (_) { /* present */ }
+  try { db.prepare('ALTER TABLE playlists ADD COLUMN published_smart_rules TEXT').run(); } catch (_) { /* present */ }
+  // "Play every N seconds" (lib/repeat-every.js): NULL = plays once per loop, as before.
+  try { db.prepare('ALTER TABLE playlist_items ADD COLUMN repeat_every_sec INTEGER').run(); console.log('[migrate] playlist_items.repeat_every_sec added'); } catch (_) { /* present */ }
 
   const BASELINE_ID = 'revisions_baseline_v1';
   if (!db.prepare('SELECT 1 FROM schema_migrations WHERE id = ?').get(BASELINE_ID)) {

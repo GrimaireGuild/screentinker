@@ -6,6 +6,7 @@ import { openContentPicker } from '../components/content-picker.js';
 import { t, tn } from '../i18n.js';
 import { frameDeviceOutput, displayAspectRatio } from '../lib/device-frame.js';
 import { renderApprovalBar } from '../components/approval-actions.js';
+import { openSmartRulesModal, rulesSummary, loadFolders, DEFAULT_RULES } from '../components/smart-rules.js';
 
 function formatDate(ts) {
   if (!ts) return '--';
@@ -189,13 +190,14 @@ function renderPlaylistGrid(playlists) {
             <div style="font-size:16px;font-weight:600;color:var(--text-primary)">${esc(p.name)}</div>
             ${p.is_auto_generated ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-input);color:var(--text-muted)">${t('playlist.tag_auto')}</span>` : ''}
             ${p.status === 'draft' ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#78350f;color:#fbbf24">${t('playlist.tag_draft')}</span>` : ''}
+            ${p.smart_rules ? `<span title="${esc(t('smart.badge_tip'))}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:#312e81;color:#c7d2fe">✦ ${t('smart.badge')}</span>` : ''}
             ${/* ⚠️ The lock. Shown BEFORE anyone tries to delete it, because deletion is refused
                   while it is nested and an unexplained refusal is worse than a visible constraint.
                   BrightSign's pattern; the one thing Appspace conspicuously lacks. */ ''}
             ${p.used_by_count ? `<span title="${esc(tn('playlist.used_by_tip', p.used_by_count))}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:#1e3a2f;color:#6ee7b7">🔒 ${esc(tn('playlist.used_by', p.used_by_count))}</span>` : ''}
             ${p.has_children ? `<span title="${esc(t('playlist.contains_tip'))}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-input);color:var(--text-muted)">☰ ${t('playlist.tag_nested')}</span>` : ''}
           </div>
-          <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;margin-left:12px">${tn('playlist.item_count', p.item_count)}</div>
+          <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;margin-left:12px">${p.smart_rules ? t('smart.by_rules') : tn('playlist.item_count', p.item_count)}</div>
         </div>
         ${p.description ? `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.4">${esc(p.description)}</div>` : ''}
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)">
@@ -213,7 +215,11 @@ function showCreateModal() {
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:400px;max-width:90vw">
       <h3 style="margin-bottom:16px;color:var(--text-primary)">${t('playlist.new_playlist')}</h3>
       <input type="text" id="newPlaylistName" class="input" placeholder="${t('playlist.name_placeholder')}" style="width:100%;margin-bottom:12px" autofocus>
-      <textarea id="newPlaylistDesc" class="input" placeholder="${t('playlist.desc_placeholder')}" style="width:100%;height:60px;resize:vertical;margin-bottom:16px"></textarea>
+      <textarea id="newPlaylistDesc" class="input" placeholder="${t('playlist.desc_placeholder')}" style="width:100%;height:60px;resize:vertical;margin-bottom:12px"></textarea>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text-secondary);margin-bottom:16px;cursor:pointer">
+        <input type="checkbox" id="newPlaylistSmart" style="margin-top:3px">
+        <span><strong style="color:var(--text-primary)">${t('smart.create_label')}</strong><br>${t('smart.create_hint')}</span>
+      </label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-secondary" id="cancelCreateBtn">${t('common.cancel')}</button>
         <button class="btn btn-primary" id="confirmCreateBtn">${t('playlist.create_btn')}</button>
@@ -232,6 +238,21 @@ function showCreateModal() {
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
     const desc = document.getElementById('newPlaylistDesc').value.trim();
+    // A smart playlist is born with its rules: pick them first, create on save.
+    if (document.getElementById('newPlaylistSmart').checked) {
+      modal.remove();
+      openSmartRulesModal({
+        title: t('smart.title_new', { name }),
+        initial: DEFAULT_RULES,
+        saveLabel: t('playlist.create_btn'),
+        onSave: async (rules) => {
+          const pl = await api.createPlaylist(name, desc, rules);
+          showToast(t('playlist.toast.created'));
+          window.location.hash = `#/playlists/${pl.id}`;
+        },
+      });
+      return;
+    }
     try {
       const pl = await api.createPlaylist(name, desc);
       modal.remove();
@@ -469,7 +490,9 @@ function renderDetailContent(container, playlist) {
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-secondary" id="previewPlaylistBtn">${t('widget.preview')}</button>
-        <button class="btn btn-primary" id="addItemBtn">${t('playlist.add_content')}</button>
+        ${playlist.smart_rules
+          ? `<button class="btn btn-primary" id="editRulesBtn">${t('smart.edit_rules')}</button>`
+          : `<button class="btn btn-primary" id="addItemBtn">${t('playlist.add_content')}</button>`}
         <button class="btn btn-secondary" id="deletePlaylistBtn" style="color:var(--danger)">${t('playlist.delete_playlist')}</button>
       </div>
     </div>
@@ -503,13 +526,15 @@ function renderDetailContent(container, playlist) {
         <option value="weighted" ${playlist.playback_order === 'weighted' ? 'selected' : ''}>${t('playlist.order.weighted')}</option>
       </select>
     </div>
+    ${playlist.smart_rules ? `<div id="smartPanel" style="background:var(--bg-card);border:1px solid #4338ca;border-radius:var(--radius);padding:12px 16px;margin-bottom:10px"></div>` : ''}
     <div id="playlistSelectBar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
     </div>
     <div id="playlistItems" style="display:flex;flex-direction:column;gap:8px">
     </div>
   `;
 
-  renderItems(playlist.items || []);
+  if (playlist.smart_rules) renderSmart(playlist);
+  else renderItems(playlist.items || []);
 
   renderApprovalBar(document.getElementById('playlistApprovalBar'), {
     type: 'playlist', id: playlist.id, name: playlist.name,
@@ -551,7 +576,18 @@ function renderDetailContent(container, playlist) {
   document.getElementById('playlistTitle').addEventListener('click', () => inlineEdit(playlist, 'name'));
   document.getElementById('playlistDesc').addEventListener('click', () => inlineEdit(playlist, 'description'));
 
-  document.getElementById('addItemBtn').addEventListener('click', () => showAddItemModal(playlist.id));
+  document.getElementById('addItemBtn')?.addEventListener('click', () => showAddItemModal(playlist.id));
+  document.getElementById('editRulesBtn')?.addEventListener('click', () => {
+    openSmartRulesModal({
+      title: t('smart.title_edit', { name: playlist.name }),
+      initial: (playlist.smart && playlist.smart.rules) || DEFAULT_RULES,
+      onSave: async (rules) => {
+        await api.updatePlaylist(playlist.id, { smart_rules: rules });
+        showToast(t('smart.toast.saved'), 'info');
+        renderDetailContent(container, await api.getPlaylist(playlist.id));
+      },
+    });
+  });
 
   /*
    * #319: sort the whole playlist in one go.
@@ -629,7 +665,11 @@ function renderDetailContent(container, playlist) {
    */
   gettingStarted.mount(document.getElementById('gettingStarted'), {
     onAction: (a) => {
-      if (a === 'new-playlist') { showAddItemModal(playlist.id); return true; }
+      if (a === 'new-playlist') {
+        if (playlist.smart_rules) document.getElementById('editRulesBtn')?.click();
+        else showAddItemModal(playlist.id);
+        return true;
+      }
       return false;
     },
     ctaFor: { playlist: t('gs.playlist.cta_here') },
@@ -675,6 +715,7 @@ function clipPayload(items) {
     fit_mode: it.fit_mode || null,
     play_when: it.play_when || null,
     weight: it.weight || 1,
+    repeat_every_sec: it.repeat_every_sec || null,
     schedules: it.schedules || [],
   }));
 }
@@ -1051,6 +1092,74 @@ async function handleSelection(act) {
   }
 }
 
+/*
+ * A smart playlist's items come from its rules (server: lib/smart-playlist.js), so the editor shows
+ * what they select right now, read-only. Hand-editing is the rules' job, and the item routes refuse it.
+ */
+async function renderSmart(playlist) {
+  currentPlaylistItems = [];
+  selectedItemIds = new Set();
+  const smart = playlist.smart || { rules: null, count: 0, items: [] };
+  const sortBar = document.getElementById('playlistSortBar');
+  if (sortBar) {
+    // Order is the rules' sort; only the playback order (sequential / shuffle) applies here.
+    sortBar.style.display = 'flex';
+    for (const id of ['playlistSort', 'playlistSortApply']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    const label = sortBar.querySelector('span');
+    if (label) label.style.display = 'none';
+  }
+  const panel = document.getElementById('smartPanel');
+  const folders = smart.rules && smart.rules.rules.some((r) => r.field === 'folder') ? await loadFolders() : [];
+  if (panel) {
+    panel.innerHTML = `
+      <div style="font-size:13px;color:#c7d2fe;font-weight:600;margin-bottom:4px">✦ ${t('smart.panel_title')}</div>
+      <div style="font-size:13px;color:var(--text-primary);margin-bottom:4px">${esc(rulesSummary(smart.rules, folders))}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${t('smart.panel_hint')}</div>`;
+  }
+  const itemsEl = document.getElementById('playlistItems');
+  if (!itemsEl) return;
+  if (!smart.items.length) {
+    itemsEl.innerHTML = `
+      <div style="text-align:center;padding:40px;color:var(--text-muted);border:2px dashed var(--border);border-radius:var(--radius-lg)">
+        <p style="margin-bottom:8px">${t('smart.empty')}</p>
+        <p style="font-size:13px">${t('smart.empty_hint')}</p>
+      </div>`;
+    return;
+  }
+  itemsEl.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:2px">${t('smart.preview_count', { n: smart.count })}${smart.count > smart.items.length ? ' · ' + t('smart.showing_first', { n: smart.items.length }) : ''}</div>
+    ${smart.items.map((it, i) => `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;display:flex;align-items:center;gap:12px">
+      <div style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center">${i + 1}</div>
+      <div style="width:48px;height:36px;border-radius:4px;overflow:hidden;background:var(--bg-input);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        ${it.thumbnail_path ? `<img data-auth-src="/api/content/${esc(it.id)}/thumbnail" style="width:100%;height:100%;object-fit:cover">` : `<div style="color:var(--text-muted);opacity:0.5">${getTypeIcon(it)}</div>`}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.filename)}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${esc(t(`smart.type.${it.type}`))}</div>
+      </div>
+    </div>`).join('')}`;
+  try { hydrateAuthImages(itemsEl); } catch { /* thumbnails are cosmetic */ }
+}
+
+/*
+ * "Play every N": weave this item through the loop at about that interval (server:
+ * lib/repeat-every.js). Sequential order only; a value that is not one of the presets (set over
+ * the API) is still shown, so the select never silently misreports what is stored.
+ */
+const REPEAT_PRESETS = [30, 60, 120, 300, 600, 900, 1800, 3600];
+function repeatLabel(sec) {
+  return sec < 60 ? t('repeat.every_sec', { n: sec }) : t('repeat.every_min', { n: Math.round((sec / 60) * 10) / 10 });
+}
+function repeatSelect(item) {
+  const cur = Number(item.repeat_every_sec) || 0;
+  const opts = REPEAT_PRESETS.includes(cur) || !cur ? REPEAT_PRESETS : [...REPEAT_PRESETS, cur].sort((a, b) => a - b);
+  return `<select class="input item-repeat" data-item-id="${item.id}" title="${esc(t('repeat.hint'))}" style="width:auto;padding:4px 6px;font-size:12px;${cur ? 'border-color:#6366f1;color:#c7d2fe' : ''}">
+    <option value="">${t('repeat.once')}</option>
+    ${opts.map((s) => `<option value="${s}" ${s === cur ? 'selected' : ''}>↻ ${esc(repeatLabel(s))}</option>`).join('')}
+  </select>`;
+}
+
 function renderItems(items) {
   const itemsEl = document.getElementById('playlistItems');
   if (!itemsEl) return;
@@ -1106,6 +1215,7 @@ function renderItems(items) {
         <span style="font-size:12px;color:var(--text-muted)">${t('playlist.sec')}</span>`}
         ${currentPlaybackOrder === 'weighted' && !item.child_playlist_id ? `<label style="font-size:12px;color:var(--text-muted)">${t('playlist.weight')}</label>
         <input type="number" class="input item-weight" data-item-id="${item.id}" value="${item.weight || 1}" min="1" max="1000" style="width:56px;padding:4px 8px;font-size:13px;text-align:center">` : ''}
+        ${currentPlaybackOrder === 'sequential' && !item.child_playlist_id ? repeatSelect(item) : ''}
         <label style="font-size:12px;color:var(--text-muted)" title="${esc(t('playlist.play_window_hint'))}">${t('playlist.play_from')}</label>
         <input type="datetime-local" class="input item-play-from" data-item-id="${item.id}" value="${esc(item.play_from || '')}" style="width:168px;padding:4px 6px;font-size:12px">
         <label style="font-size:12px;color:var(--text-muted)">${t('playlist.play_until')}</label>
@@ -1145,6 +1255,19 @@ function renderItems(items) {
       if (Number.isNaN(val) || val < (isLive ? 0 : 1)) { e.target.value = isLive ? 0 : 10; return; }
       try {
         await api.updatePlaylistItem(currentPlaylistId, itemId, { duration_sec: val });
+        refreshAfterMutation();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  });
+
+  itemsEl.querySelectorAll('.item-repeat').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      const v = e.target.value ? Number(e.target.value) : null;
+      try {
+        await api.updatePlaylistItem(currentPlaylistId, e.target.dataset.itemId, { repeat_every_sec: v });
+        showToast(t('repeat.toast_saved'), 'info');
         refreshAfterMutation();
       } catch (err) {
         showToast(err.message, 'error');
