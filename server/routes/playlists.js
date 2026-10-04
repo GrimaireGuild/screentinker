@@ -214,7 +214,8 @@ function buildSnapshotItems(playlistId, _depth = 0, _ancestors = null) {
     console.warn(`[playlist] nesting cycle at ${playlistId} — reference dropped`);
     return [];
   }
-  const own = db.prepare('SELECT id, user_id, workspace_id, smart_rules, playback_order FROM playlists WHERE id = ?').get(playlistId);
+  // SELECT *: the embedded build's playlists table is a subset, and must not need these columns.
+  const own = db.prepare('SELECT * FROM playlists WHERE id = ?').get(playlistId);
   // A smart playlist's items come from its rules, never from playlist_items. Same output shape, so
   // nesting, publish and the players cannot tell the difference (lib/smart-playlist.js).
   if (own && own.smart_rules) return smartPlaylist.snapshotItems(db, own);
