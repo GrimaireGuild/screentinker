@@ -26,7 +26,7 @@
 // v29: shells for 2.1.1-2.1.4 shipped without a cache-name bump, so warm web players kept serving the
 // v28-cached (pre-2.1.1) shell. Bumping purges it on activate; the index.html version-mismatch
 // self-heal is the durable fix, this just gives already-warm players a second, immediate nudge.
-const CACHE_NAME = 'rd-player-v29';
+const CACHE_NAME = 'rd-player-v30-genesis';
 // Content lives in its own cache so the shell can be re-versioned (the activate handler deletes
 // every cache that is not CACHE_NAME) WITHOUT throwing away megabytes of media that are still
 // perfectly valid. Rolling the shell used to mean a player re-downloaded its entire playlist.

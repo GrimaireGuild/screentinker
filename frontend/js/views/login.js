@@ -77,7 +77,7 @@ export async function render(container) {
   const canRegister = config.registration_enabled !== false;
 
   applyLoginBrandingDoc(branding);
-  const brandName = branding.brand_name || 'ScreenTinker';
+  const brandName = branding.brand_name || 'Genesis Guild';
   // Branded logo if set, else the default ScreenTinker glyph.
   const logoHtml = branding.logo_url
     ? `<img src="${brandEsc(branding.logo_url)}" alt="${brandEsc(brandName)}" style="max-height:48px;max-width:200px;margin:0 auto 12px;display:block">`

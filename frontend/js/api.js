@@ -49,7 +49,7 @@ const REMOTE_UNAVAILABLE = ['/content', '/walls', '/schedules', '/widgets', '/la
  * your own server while your screen says you are looking at someone else's. Add only session and
  * server-scoped routes, never org data.
  */
-const ALWAYS_LOCAL = ['/auth', '/admin', '/workspaces', '/tokens', '/subscription', '/provision', '/ai', '/mesh'];
+const ALWAYS_LOCAL = ['/auth', '/admin', '/genesis', '/workspaces', '/tokens', '/subscription', '/provision', '/ai', '/mesh'];
 
 /*
  * Segment-exact: '/devices' matches '/devices' and '/devices/x', never '/devices-archive'. The

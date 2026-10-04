@@ -200,7 +200,7 @@ fi
 # Set kiosk URL
 if [ "$PLAYER_ONLY" = true ]; then
     [ -z "$SERVER_URL" ] && err "Player-only mode requires a server URL"
-    KIOSK_URL="${SERVER_URL}/player"
+    KIOSK_URL="${SERVER_URL}${GENESIS_PLAYER_PATH:-/player}"
     log "Player-only mode: $SERVER_URL"
 else
     KIOSK_URL="http://localhost:${SCREENTINKER_PORT}/player"

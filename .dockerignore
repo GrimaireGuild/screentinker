@@ -36,3 +36,8 @@ video
 .vscode
 .idea
 .DS_Store
+
+secrets/
+.genesis-data/
+.genesis-test-data/
+.genesis-test-results.txt

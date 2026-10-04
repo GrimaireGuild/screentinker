@@ -1,0 +1,39 @@
+name: genesis-guild-signage
+services:
+  signage:
+    build:
+      context: .
+      dockerfile: Dockerfile.genesis
+    image: genesis-guild/signage:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${GENESIS_BIND_ADDRESS:-127.0.0.1}:${GENESIS_PORT:-3001}:3001"
+    environment:
+      SELF_HOSTED: "true"
+      DISABLE_HOMEPAGE: "true"
+      DISABLE_REGISTRATION: "true"
+      HIDE_BILLING: "true"
+      AUTO_CREATE_ORG_ON_SIGNUP: "false"
+      APP_URL: "${APP_URL:-http://localhost:3001}"
+      GENESIS_ADMIN_EMAIL: "${GENESIS_ADMIN_EMAIL:-doom@genesis-guild.com}"
+      GENESIS_ADMIN_PASSWORD_FILE: /run/secrets/genesis_admin_password
+      HEARTBEAT_TIMEOUT: "90000"
+    secrets:
+      - genesis_admin_password
+    volumes:
+      - signage-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+secrets:
+  genesis_admin_password:
+    file: ./secrets/admin-password.txt
+volumes:
+  signage-data:

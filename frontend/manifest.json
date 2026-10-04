@@ -1,22 +1,17 @@
 {
-  "name": "ScreenTinker",
-  "short_name": "ScreenTinker",
-  "description": "Digital Signage Management",
-  "start_url": "/",
+  "name": "Genesis Guild",
+  "short_name": "Genesis Guild",
+  "description": "Digital signage for stores and restaurants",
+  "start_url": "/app",
   "display": "standalone",
-  "background_color": "#111827",
-  "theme_color": "#3B82F6",
-  "orientation": "any",
+  "background_color": "#0d0c11",
+  "theme_color": "#7745ad",
   "icons": [
     {
-      "src": "/assets/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/assets/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "/assets/genesis-mask.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }

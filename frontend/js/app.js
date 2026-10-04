@@ -1,5 +1,6 @@
 import { connectSocket } from './socket.js';
 import * as dashboard from './views/dashboard.js';
+import * as genesis from './views/genesis.js';
 import * as deviceDetail from './views/device-detail.js';
 import * as contentLibrary from './views/content-library.js';
 import * as settings from './views/settings.js';
@@ -453,7 +454,7 @@ function route() {
 
   // If authenticated and on login page, redirect to dashboard or onboarding
   if (isAuthenticated() && (isLoginRoute || isResetRoute)) {
-    window.location.hash = localStorage.getItem('rd_onboarded') ? '#/' : '#/onboarding';
+    window.location.hash = '#/';
     return;
   }
 
@@ -554,7 +555,8 @@ function route() {
   const navLinks = document.querySelectorAll('.nav-link');
   navLinks.forEach(link => {
     link.classList.remove('active');
-    if (hash === '#/' && link.dataset.view === 'dashboard') link.classList.add('active');
+    if ((hash === '#/' || hash === '#/locations') && link.dataset.view === 'genesis') link.classList.add('active');
+    else if (hash === '#/screens' && link.dataset.view === 'dashboard') link.classList.add('active');
     else if (hash.startsWith('#/content') && link.dataset.view === 'content') link.classList.add('active');
     else if (hash.startsWith('#/settings') && link.dataset.view === 'settings') link.classList.add('active');
     else if (hash.startsWith('#/billing') && link.dataset.view === 'billing') link.classList.add('active');
@@ -578,7 +580,10 @@ function route() {
   });
 
   // Route to view
-  if (hash === '#/' || hash === '#' || hash === '') {
+  if (hash === '#/' || hash === '#' || hash === '' || hash === '#/locations') {
+    currentView = genesis;
+    genesis.render(app);
+  } else if (hash === '#/screens') {
     currentView = dashboard;
     dashboard.render(app);
   } else if (hash.startsWith('#/device/')) {
@@ -789,7 +794,7 @@ function updateSidebarUser() {
       `<div style="width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">${esc((user.name || user.email)[0].toUpperCase())}</div>`}
     <div style="flex:1;min-width:0">
       <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(user.name || user.email)}</div>
-      <div style="font-size:10px;color:var(--text-muted)">${user.role}</div>
+      <div style="font-size:10px;color:var(--text-muted)">${isPlatformAdmin(user) ? 'Global admin' : user.current_workspace_role === 'workspace_admin' ? 'Location admin' : esc(user.current_workspace_role || user.role)}</div>
     </div>
     <button id="logoutBtn" class="btn-icon" title="${t('auth.sign_out')}" style="flex-shrink:0">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

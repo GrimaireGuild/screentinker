@@ -1249,6 +1249,7 @@ app.use('/unsubscribe',
 app.use('/mcp', rateLimit(60000, 120), require('./routes/mcp'));
 
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/genesis', rateLimit(60000, 120), require('./routes/genesis'));
 // Per-organization SSO configuration. Mounted under /api/organizations so the org id is the
 // route's own subject, which is what the org_owner/org_admin check keys on.
 /*

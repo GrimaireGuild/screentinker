@@ -41,8 +41,8 @@ function lookup(key) {
 function brandName() {
   try {
     const n = typeof window !== 'undefined' && window.__ST_BRAND_NAME;
-    return (typeof n === 'string' && n.trim()) ? n.trim() : 'ScreenTinker';
-  } catch (e) { return 'ScreenTinker'; }
+    return (typeof n === 'string' && n.trim()) ? n.trim() : 'Genesis Guild';
+  } catch (e) { return 'Genesis Guild'; }
 }
 
 function format(s, vars) {

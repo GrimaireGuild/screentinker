@@ -21,12 +21,12 @@
 const PLATFORM_DEFAULT_ID = 'platform-default';
 
 const HARDCODED_BRANDING = {
-  brand_name: 'ScreenTinker',
-  logo_url: null,
-  favicon_url: null,
-  primary_color: '#3B82F6',
-  secondary_color: '#1E293B',
-  bg_color: '#111827',
+  brand_name: 'Genesis Guild',
+  logo_url: '/assets/genesis-mask.svg',
+  favicon_url: '/assets/genesis-mask.svg',
+  primary_color: '#a578d0',
+  secondary_color: '#19151f',
+  bg_color: '#0d0c11',
   custom_css: null,
   hide_branding: 0,
 };
